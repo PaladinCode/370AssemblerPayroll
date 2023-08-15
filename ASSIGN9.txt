@@ -1,0 +1,903 @@
+//KC03D43A JOB ,'M. SOUTHWOOD',MSGCLASS=H
+//JSTEP01  EXEC PGM=ASSIST
+//STEPLIB  DD DSN=KC00NIU.ASSIST.LOADLIB,DISP=SHR
+//SYSPRINT DD SYSOUT=*
+//SYSIN    DD *
+         PRINT NOGEN
+*****************************************************************
+*                                                               *
+*  CSCI 360-1              ASSIGNMENT 9       SUMMER 2023       *
+*                                                               *
+*  PROGRAMMER NAME: MARK SOUTHWOOD                              *
+*             DATE: 8/9/23                                      *
+*     PROGRAM NAME: PAYROLL2                                    *
+*         FUNCTION: PAYROLL PROGRAM WITH TABLES AND             *
+*                   EXTERNAL PROGRAMS                           *
+*                                                               *
+*****************************************************************
+*
+PAYROLL2 CSECT
+*
+* STANDARD ENTRY LINKAGE WITH R12 AS BASE REGISTER
+*
+         STM   14,12,12(13)    SAVE REGS IN CALLER'S SAVE AREA
+         LR    12,15           COPY CSECT ADDR INTO R12
+         USING PAYROLL2,12     ESTABLISH R12 AS THE BASE REG
+         LA    14,REGSAVE      R14 POINTS TO THIS CSECT'S SAVE AREA
+         ST    14,8(,13)       STORE ADDR OF THIS CSECT'S SAVE AREA
+         ST    13,4(,14)       STORE ADDR OF CALLER'S SAVE AREA
+         LR    13,14           POINT R13 AT THIS CSECT'S SAVE AREA
+*
+*
+*
+         LA    11,4095(,12)      ESTABLISH
+         LA    11,1(,11)         SECOND
+         USING PAYROLL2+4096,11  BASE REGISTER
+*
+********************************BUILDTBL SUBPROGRAM CALL
+*
+         LA    1,BTPARMS        R1 -> PARAMETER LIST FOR BUILDTBL
+         L     15,=V(BUILDTBL)  R15 -> SUBPROGRAM BUILDTBL
+         BALR  14,15            BRANCH AND LINK TO BUILDTBL
+*
+********************************BUILDTBL SUBPROGRAM EXIT
+*
+*
+*
+********************************PROCTBL SUBPROGRAM CALL
+*
+         LA    1,PTPARMS        R1 -> PARAMETER LIST FOR BUILDTBL
+         L     15,=V(PROCTBL)   R15 -> SUBPROGRAM BUILDTBL
+         BALR  14,15            BRANCH AND LINK TO BUILDTBL
+*
+********************************PROCTBL SUBPROGRAM EXIT
+*
+*
+*
+*  STANDARD EXIT LINKAGE WITH RC OF 0
+*
+         SR    15,15                    R15 = RETURN CODE OF 0
+         L     13,4(,13)                POINT R13 TO CALLER'S SAVE AREA
+         L     14,12(,13)               RESTORE REGISTER 14
+         LM    0,12,20(13)              RESTORE R0 THRU R12
+*
+         BR    14                       RETURN TO CALLER
+*
+         LTORG                          LITERAL ORGANIZATION
+*
+*
+*
+REGSAVE  DS    18F            PROGRAM'S REGISTER SAVE AREA
+*
+BTPARMS  DC    A(EMPTBL)      EMPLOYEE TABLE PARAMATER
+         DC    A(PEMPCTR)     EMPLOYEE COUNTER PARAMATER
+         DC    A(PFWHPCT)     FED WITHHOLDING PCT PARAMATER
+         DC    A(PSWHPCT)     STATE WITHHOLDING PCT PARAMATER
+*
+PTPARMS  DC    A(EMPTBL)      EMPLOYEE TABLE PARAMATER
+         DC    A(PEMPCTR)     EMPLOYEE COUNTER PARAMATER
+         DC    A(PFWHPCT)     FED WITHHOLDING PCT PARAMATER
+         DC    A(PSWHPCT)     STATE WITHHOLDING PCT PARAMATER
+*
+EMPTBL   DS    120CL42        EMPLOYEE TABLE (5040 BYTES)
+*
+*
+*
+PFWHPCT  DC    PL4'0'         PACKED FEDERAL WITHHOLDING PERCENTAGE
+PSWHPCT  DC    PL4'0'         PACKED STATE WITHHOLDING PERCENTAGE
+*
+PEMPCTR  DC    PL3'0'         PACKED EMPLOYEE COUNTER (MAX 999)
+*
+*
+*
+*****************************************************************
+*                                                               *
+*  CSCI 360-1              ASSIGNMENT 9       SUMMER 2023       *
+*                                                               *
+*  PROGRAMMER NAME: MARK SOUTHWOOD                              *
+*             DATE: 8/9/23                                      *
+*     PROGRAM NAME: BUILDTBL                                    *
+*         FUNCTION: READS INPUT AND CREATES                     *
+*                   A TABLE                                     *
+*                                                               *
+*****************************************************************
+$WITHPCT DSECT                DSECT FOR FED/STATE WTH PCT
+$IFWHPCT DS    ZL6            FEDERAL WITHHOLDING PERCENT
+$ISWHPCT DS    ZL6            STATE WITHHOLDING PERCENT
+*
+$TEMPTB1 DSECT                DSECT FOR EMPLOYEE TABLE
+$TEMPID1 DS    PL5            TABLE'S EMPLOYEE ID
+$THRPAY1 DS    PL3            TABLE'S EMPLOYEE HOURLY PAY
+$THOURS1 DS    PL3            TABLE'S EMPLOYEE HOURS WORKED
+$TDED1   DS    PL3            TABLE'S EMPLOYEE DEDUCTIONS
+$TBONUS1 DS    PL3            TABLE'S EMPLOYEE BONUS
+$TENAME1 DS    CL25           TABLE'S EMPLOYEE NAME
+*
+$RECORD  DSECT                DSECT FOR EMPLOYEE RECORDS
+$IEMPID  DS    ZL8            EMPLOYEE ID INPUT RECORD
+$IHRPAY  DS    ZL5            EMPLOYEE HOURLY PAY INPUT RECORD
+$IHOURS  DS    ZL5            EMPLOYEE HOURS WORKED INPUT RECORD
+$IDEDUCT DS    ZL5            EMPLOYEE DEDUCTIONS INPUT RECORD
+$IBONUS  DS    ZL5            EMPLOYEE BONUS INPUT RECORD
+$IEMPNME DS    CL25           EMPLOYEE NAME INPUT RECORD
+*
+*
+BUILDTBL CSECT
+         STM   14,12,12(13)   SAVE REGS IN CALLER'S SAVE AREA
+         LR    12,15          COPY CSECT ADDRESS INTO R12
+         USING BUILDTBL,12    ESTABLISH R12 AS THE BASE REG
+         LA    14,BTSAVE      R14 POINTS TO THIS CSECT'S SAVE AREA
+         ST    14,8(,13)      STORE ADDRESS OF THIS CSECT'S SAVE AREA
+         ST    13,4(,14)      STORE ADDRESS OF CALLER'S SAVE AREA
+         LR    13,14          POINT R13 AT THIS CSECT'S SAVE AREA
+*
+*
+*
+         LM    2,5,0(1)       R2 -> EMPTBL 120CL42 (5040 BYTES)
+*                             R3 -> PEMPCTR(3) PACKED DECIMAL
+*                             R4 -> PFWHPCT(4) PACKED DECIMAL
+*                             R5 -> PSWHPCT(4) PACKED DECIMAL
+*
+         LA    6,RECORD       R6 -> BEGINNING OF THE INPUT RECORD
+         USING $WITHPCT,6     ESTABLISH ADDRESSABILITY FOR WITHOLDINGS
+         XREAD RECORD,80      READ 1ST RECORD WITHHOLDING PERCENTAGES
+         BNZ   ENDLOOP1       BRANCH TO EXIT LINKAGE IF NO RECORDS
+*
+         PACK  0(4,4),$IFWHPCT(6)     PACK FED WH PERCENTAGE
+         PACK  0(4,5),$ISWHPCT(6)     PACK ST WH PERCENTAGE
+*
+*
+         DROP  6              REMOVE ADDRESSIBILITY OF $WITHPCT
+*
+         USING $TEMPTB1,2     ESTABLISH ADDRESSABILITY FOR TBL ENTRY
+*
+*
+         LA    6,RECORD       R6 -> FIRST EMPLOYEE RECORD
+         USING $RECORD,6      ESTABLISH ADDRESSABILITY FOR RECORD
+*
+         XREAD RECORD,80      READ FIRST EMPLOYEE RECORD
+*
+LOOP1    BNZ   ENDLOOP1       BRANCH IF NO RECORD
+*
+         AP    0(3,3),=PL1'1'   ADD 1 TO EMPLOYEE COUNTER
+*
+         PACK  $TEMPID1(5),$IEMPID(8)    PACK THE EMPLOYEE ID
+         PACK  $THRPAY1(3),$IHRPAY(5)    PACK THE HOURLY PAY
+         PACK  $THOURS1(3),$IHOURS(5)    PACK THE HOURS WORKED
+         PACK  $TDED1(3),$IDEDUCT(5)     PACK THE BONUS
+         PACK  $TBONUS1(3),$IBONUS(5)    PACK THE BONUS
+         MVC   $TENAME1(25),$IEMPNME     MOVE NAME TO TABLE
+*
+         LA    2,42(,2)       R2 -> NEXT ENTRY IN TABLE
+*
+         XREAD RECORD,80      READ NEXT RECORD
+*
+         B     LOOP1          BRANCH BACK TO TOP OF LOOP1
+*
+         DROP  2,6            DROP ADDRESSIBILITY ON 2 AND 6
+*
+ENDLOOP1 SR    15,15          R15 = RETURN CODE OF 0
+         L     13,4(,13)      POINT R13 TO CALLER'S SAVE AREA
+         L     14,12(,13)     RESTORE REGISTER 14
+         LM    0,12,20(13)    RESTORE R0 THRU R12
+         BR    14             RETURN TO CALLER
+*
+         LTORG                LITERAL ORGANIZATION
+*
+BTSAVE   DS    18F            REGISTER SAVE AREA
+*
+RECORD   DS    CL80           INPUT RECORD BUFFER
+*
+*
+*****************************************************************
+*                                                               *
+*  CSCI 360-1              ASSIGNMENT 9       SUMMER 2023       *
+*                                                               *
+*  PROGRAMMER NAME: MARK SOUTHWOOD                              *
+*             DATE: 8/9/23                                      *
+*     PROGRAM NAME: PROCTBL                                     *
+*         FUNCTION: READS INPUT AND CREATES                     *
+*                   A TABLE                                     *
+*                                                               *
+*****************************************************************
+*
+*
+$TEMPTB2 DSECT                DSECT FOR EMPLOYEE TABLE
+$TEMPID2 DS    PL5            TABLE'S EMPLOYEE ID
+$THRPAY2 DS    PL3            TABLE'S EMPLOYEE HOURLY PAY
+$THOURS2 DS    PL3            TABLE'S EMPLOYEE HOURS WORKED
+$TDED2   DS    PL3            TABLE'S EMPLOYEE DEDUCTIONS
+$TBONUS2 DS    PL3            TABLE'S EMPLOYEE BONUS
+$TENAME2 DS    CL25           TABLE'S EMPLOYEE NAME
+*
+*
+PROCTBL  CSECT
+         STM   14,12,12(13)   SAVE REGS IN CALLER'S SAVE AREA
+         LR    12,15          COPY CSECT ADDRESS INTO R12
+         USING PROCTBL,12     ESTABLISH R12 AS THE BASE REG
+         LA    14,PTSAVE      R14 POINTS TO THIS CSECT'S SAVE AREA
+         ST    14,8(,13)      STORE ADDRESS OF THIS CSECT'S SAVE AREA
+         ST    13,4(,14)      STORE ADDRESS OF CALLER'S SAVE AREA
+         LR    13,14          POINT R13 AT THIS CSECT'S SAVE AREA
+*
+*
+*
+         LM    2,5,0(1)       R2 -> EMPTBL 120CL42 (5040 BYTES)
+*                             R3 -> PEMPCTR(3) PACKED DECIMAL
+*                             R4 -> PFWHPCT(4) PACKED DECIMAL
+*                             R5 -> PSWHPCT(4) PACKED DECIMAL
+*
+         ST    4,CNPPARMS+8    STORE THE PFWHPCT TO PTPARMS
+         ST    5,CNPPARMS+16   STORE THE PSWHPCT TO PTPARMS
+         ST    3,CAPARMS+4     STORE THE PEMPCTR TO CAPARMS
+*
+         LA    6,99                SET LINE COUNTER REG TO 99
+         ZAP   DBLWORD(8),0(3,3)   MOVE EMP COUNTER TO DW
+         CVB   7,DBLWORD           CONVERT ACCTCTR TO BINARY IN R4
+*
+LOOP2    MVI   DETAIL+1,C' '            PREPARE DETAIL
+         MVC   DETAIL+2(131),DETAIL+1   FOR PRINTING
+*
+*
+         USING $TEMPTB2,2     ESTABLISH ADDRESSABILITY FOR TBL ENTRY
+*
+*
+*********************************************************EMPLOYEE ID
+*
+         MVC   EDEMPID(11),=X'4021202020602020202020'  EDIT PATTERN
+*
+*
+         ED    EDEMPID(11),$TEMPID2   EBCDIC FOR PRINTING
+         MVC   OEMPID(9),EDEMPID+2    MOVE EDEMPID TO OUTPUT
+*
+*******************************************************EMPLOYEE NAME
+*
+         MVC   OEMPNME(25),$TENAME2   MOVE EMPLOYEE NAME TO OUTPUT
+*
+**********************************************************HOURLY PAY
+         LA    1,OHRPAY+3             POINT R1 TO 1ST NONBLANK CHAR
+*
+*
+         MVC   OHRPAY(7),=X'402021204B2020'  EDIT PATTERN
+*
+*
+         EDMK  OHRPAY(7),$THRPAY2     MARKED OUTPUT FOR FLOATING $
+         BCTR  1,0                    DECREMENT R1(SHIFT 1 FOR $)
+         MVI   0(1),C'$'              PLACE $
+*
+********************************************************HOURS WORKED
+*
+         MVC   OHOURS(7),=X'402020214B2020'  EDIT PATTERN
+*
+*
+         ED    OHOURS(7),$THOURS2     CONVERT TO EBCDIC FOR PRINTING
+*
+***********************************************************GROSS PAY
+         ZAP   PCALC1(10),$THRPAY2(3)  COPY PHRPAY INTO LARGER PCALC
+*
+         MP    PCALC1(10),$THOURS2(3)  MULTIPLY PCALC BY PHOURS
+*
+         SRP   PCALC1(10),64-2,5       SHIFT 2 DEC PLACES OFF PRODUCT
+*
+         ZAP   PEMPGPAY(6),PCALC1(10)   COPY PCALC TO PEMPGPAY
+         SP    PEMPGPAY(6),$TDED2(3)    SUBTRACT DEDUCTIONS
+         AP    PEMPGPAY(6),$TBONUS2(3)  ADD BONUS TO GROSS
+         LA    1,OEMPGPAY+12            POINT R1 TO 1ST NONBLANK CHAR
+*
+*
+         MVC   OEMPGPAY(15),=X'402020206B2020206B2020214B2020'  ED PAT
+*
+*
+         EDMK  OEMPGPAY(15),PEMPGPAY     MARKED OUTPUT FOR FLOATING $
+         BCTR  1,0                       DECREMENT R1(SHIFT 1 FOR $)
+         MVI   0(1),C'$'                 PLACE $
+*
+         AP    PTGRPAY(7),PEMPGPAY(6)    ADD EMP GROSS TO TOTAL GROSS
+*
+*
+********************************CALCNPAY SUBPROGRAM CALL
+*
+         LA    1,CNPPARMS        R1 -> PARAMETER LIST FOR BUILDTBL
+         L     15,=V(CALCNPAY)   R15 -> SUBPROGRAM BUILDTBL
+         BALR  14,15             BRANCH AND LINK TO BUILDTBL
+*
+********************************CALCNPAY SUBPROGRAM EXIT
+*
+*
+*
+****************************************OUTPUT FEDERAL WITHHOLDINGS
+*
+*
+         LA    1,OFEDWITH+11             POINT R1 TO 1ST NONBLANK CHAR
+*
+*
+         MVC   OFEDWITH(15),=X'402020206B2020206B2021204B2020'  ED PAT
+*
+*
+         EDMK  OFEDWITH(15),PFEDWITH     MARKED OUTPUT FOR FLOATING $
+         BCTR  1,0                       DECREMENT R1(SHIFT 1 FOR $)
+         MVI   0(1),C'$'                 PLACE $
+*
+         AP    PTFWITH(7),PFEDWITH(6)    ADD EMP FWITH TO TOTAL FWITH
+*
+******************************************OUTPUT STATE WITHHOLDINGS
+         LA    1,OSTWITH+10              POINT R1 TO 1ST NONBLANK CHAR
+*
+*
+         MVC   OSTWITH(15),=X'402020206B2020206B2021204B2020'   ED PAT
+*
+*
+         EDMK  OSTWITH(15),PSTWITH       MARKED OUTPUT FOR FLOATING $
+         BCTR  1,0                       DECREMENT R1(SHIFT 1 FOR $)
+         MVI   0(1),C'$'                 PLACE $
+*
+         AP    PTSWITH(7),PSTWITH(6)     ADD EMP SWITH TO TOTAL SWITH
+*
+********************************************OUTPUT EMPLOYEE NET PAY
+*
+         LA    1,OEMPNPAY+10             POINT R1 TO 1ST NONBLANK CHAR
+*
+*
+         MVC   OEMPNPAY(15),=X'402020206B2020206B2021204B2020'   ED PAT
+*
+*
+         EDMK  OEMPNPAY(15),PEMPNPAY    MARKED OUTPUT FOR FLOATING $
+         BCTR  1,0                      DECREMENT R1(SHIFT 1 FOR $)
+         MVI   0(1),C'$'                PLACE $
+*
+         AP    PTNETPAY(7),PEMPNPAY(6)  ADD EMP NET PAY TO TOT NET PAY
+*
+         C     6,=F'17'                 COMPARE LINE COUNTER TO 17
+         BL    NOHDRS                   BRANCH IF LESS THAN 17 (NOHDRS)
+*
+         AP    PPAGECTR(2),=PL1'1'       INCREASE PAGE CTR BY 1
+         MVC   OPAGECTR(4),=X'40202120'  EDIT PATTERN FOR PAGE #
+         ED    OPAGECTR(4),PPAGECTR      CONVERT TO EBCDIC FOR PRINTING
+*
+         XPRNT HEADER1,133               PRINT PAGE HEADER 1
+         XPRNT HEADER2,133               PRINT PAGE HEADER 2
+         XPRNT HEADER3,133               PRINT PAGE HEADER 3
+         XPRNT HEADER4,133               PRINT PAGE HEADER 4
+         XPRNT HEADER5,133               PRINT PAGE HEADER 5
+*
+         SR    6,6                       SET LINE COUNTER TO ZERO
+*
+NOHDRS   XPRNT DETAIL,133               PRINT EMPLOYEE DETAIL RECORD
+         LA    6,1(,6)                  INCREMENT LINE COUNTER
+*
+         LA    2,42(,2)       R2 -> NEXT ENTRY IN TABLE
+         BCT   7,LOOP2        IF ANOTHER ENTRY, BRANCH BACK TO LOOP2
+*
+ENDLOOP2 DS    0H                        END OF LOOP 2
+*
+         DROP  2              DROP ADDRESIBILITY OF R2
+*
+*
+*
+*******************************************OUTPUT TOTALS AND AVERAGES
+*
+*
+*
+*
+         AP    PPAGECTR(2),=PL1'1'       INCREASE PAGE CTR BY 1
+         MVC   OPAGECTR(4),=X'40202120'  EDIT PATTERN FOR PAGE #
+         ED    OPAGECTR(4),PPAGECTR      CONVERT TO EBCDIC FOR PRINTING
+*
+         MVC   OEMPCTR(6),=X'402020202120'  EDIT PATTERN FOR EMPCTR
+         ED    OEMPCTR(6),PEMPCTR           EBCDIC FOR PRINTING
+*
+*
+         XPRNT HEADER1,133              PRINT PAGE HEADER 1
+         XPRNT TOTALS1,133              PRINT TOTALS HEADER 1
+         XPRNT TOTALS2,133              PRINT TOTALS HEADER 2
+         XPRNT TOTALS3,133              PRINT TOTALS HEADER 3
+*
+*
+         SRP   0(3,3),2,5    ADD 2 TWO DECIMAL PLACES TO PEMPCTR
+*
+******************************************************GROSS PAY TOTAL
+         LA    1,OTGRPAY+14               POINT R1 TO 1ST NONBLANK CHAR
+*
+*                                         EDIT PATTERN FOR OTGRPAY
+         MVC   OTGRPAY(18),=X'4020206B2020206B2020206B2021204B2020'
+*
+*
+         EDMK  OTGRPAY(18),PTGRPAY        MARKED OUTPUT FOR FLOATING $
+         BCTR  1,0                        DECREMENT R1(SHIFT 1 FOR $)
+         MVI   0(1),C'$'                  PLACE $
+*
+*
+         ZAP   PTOTAL(7),PTGRPAY(7)       COPY PTGRPAY TO PTOTAL
+*
+********************************CALCAVG SUBPROGRAM CALL
+*
+         LA    1,CAPARMS         R1 -> PARAMETER LIST FOR BUILDTBL
+         L     15,=V(CALCAVG)    R15 -> SUBPROGRAM BUILDTBL
+         BALR  14,15             BRANCH AND LINK TO BUILDTBL
+*
+********************************CALCAVG SUBPROGRAM EXIT
+*
+*
+****************************************************GROSS PAY AVERAGE
+         LA    1,OAGRPAY+14             POINT R1 TO 1ST NONBLANK CHAR
+*
+*                                       EDIT PATTERN FOR OAGRPAY
+         MVC   OAGRPAY(15),=X'402020206B2020206B2021204B2020'
+*
+*
+         EDMK  OAGRPAY(15),PAVG         MARKED OUTPUT FOR FLOATING $
+         BCTR  1,0                      DECREMENT R1(SHIFT 1 FOR $)
+         MVI   0(1),C'$'                PLACE $
+*
+*
+*
+         XPRNT TOTALS4,133              PRINT TOTALS LINE 4
+*
+*
+*
+******************************************TOTAL FEDERAL WITHHOLDINGS
+         LA    1,OTFWITH+14             POINT R1 TO 1ST NONBLANK CHAR
+*
+*                                       EDIT PATTERN FOR OTFWITH
+         MVC   OTFWITH(18),=X'4020206B2020206B2020206B2021204B2020'
+*
+*
+         EDMK  OTFWITH(18),PTFWITH      MARKED OUTPUT FOR FLOATING $
+         BCTR  1,0                      DECREMENT R1(SHIFT 1 FOR $)
+         MVI   0(1),C'$'                PLACE $
+*
+*
+*
+****************************************AVERAGE FEDERAL WITHHOLDINGS
+*
+*
+         ZAP   PTOTAL(7),PTFWITH(7)      COPY PTFWITH TO PTOTAL
+*
+********************************CALCAVG SUBPROGRAM CALL
+*
+         LA    1,CAPARMS         R1 -> PARAMETER LIST FOR BUILDTBL
+         L     15,=V(CALCAVG)    R15 -> SUBPROGRAM BUILDTBL
+         BALR  14,15             BRANCH AND LINK TO BUILDTBL
+*
+********************************CALCAVG SUBPROGRAM EXIT
+*
+         LA    1,OAFWITH+14             POINT R1 TO 1ST NONBLANK CHAR
+*
+*                                       EDIT PATTERN FOR OAFWITH
+         MVC   OAFWITH(15),=X'402020206B2020206B2021204B2020'
+*
+         EDMK  OAFWITH(15),PAVG         MARKED OUTPUT FOR FLOATING $
+         BCTR  1,0                      DECREMENT R1(SHIFT 1 FOR $)
+         MVI   0(1),C'$'                PLACE $
+*
+*
+*
+         XPRNT TOTALS5,133              PRINT TOTALS LINE 5
+*
+*
+*
+********************************************TOTAL STATE WITHHOLDINGS
+         LA    1,OTSWITH+14             POINT R1 TO 1ST NONBLANK CHAR
+*
+*                                       EDIT PATTERN FOR OTSWITH
+         MVC   OTSWITH(18),=X'4020206B2020206B2020206B2021204B2020'
+*
+*
+         EDMK  OTSWITH(18),PTSWITH      MARKED OUTPUT FOR FLOATING $
+         BCTR  1,0                      DECREMENT R1(SHIFT 1 FOR $)
+         MVI   0(1),C'$'                PLACE $
+*
+*
+*
+******************************************AVERAGE STATE WITHHOLDINGS
+*
+*
+         ZAP   PTOTAL(7),PTSWITH(7)       COPY PSFWITH TO PTOTAL
+*
+********************************CALCAVG SUBPROGRAM CALL
+*
+         LA    1,CAPARMS         R1 -> PARAMETER LIST FOR BUILDTBL
+         L     15,=V(CALCAVG)    R15 -> SUBPROGRAM BUILDTBL
+         BALR  14,15             BRANCH AND LINK TO BUILDTBL
+*
+********************************CALCAVG SUBPROGRAM EXIT
+*
+         LA    1,OASWITH+14             POINT R1 TO 1ST NONBLANK CHAR
+*
+*                                       EDIT PATTERN FOR OAFWITH
+         MVC   OASWITH(15),=X'402020206B2020206B2021204B2020'
+*
+         EDMK  OASWITH(15),PAVG         MARKED OUTPUT FOR FLOATING $
+         BCTR  1,0                      DECREMENT R1(SHIFT 1 FOR $)
+         MVI   0(1),C'$'                PLACE $
+*
+*
+         XPRNT TOTALS6,133              PRINT TOTALS LINE 6
+*
+*
+*
+*******************************************************TOTAL NET PAY
+        LA    1,OTNETPAY+14             POINT R1 TO 1ST NONBLANK CHAR
+*
+*                                       EDIT PATTERN FOR OTNETPAY
+         MVC   OTNETPAY(18),=X'4020206B2020206B2020206B2021204B2020'
+*
+*
+         EDMK  OTNETPAY(18),PTNETPAY    MARKED OUTPUT FOR FLOATING $
+         BCTR  1,0                      DECREMENT R1(SHIFT 1 FOR $)
+         MVI   0(1),C'$'                PLACE $
+*
+*
+*
+*****************************************************AVERAGE NET PAY
+*
+*
+*
+         ZAP   PTOTAL(7),PTNETPAY(7)     COPY PSFWITH TO PTOTAL
+*
+********************************CALCAVG SUBPROGRAM CALL
+*
+         LA    1,CAPARMS         R1 -> PARAMETER LIST FOR BUILDTBL
+         L     15,=V(CALCAVG)    R15 -> SUBPROGRAM BUILDTBL
+         BALR  14,15             BRANCH AND LINK TO BUILDTBL
+*
+********************************CALCAVG SUBPROGRAM EXIT
+*
+*
+*
+         LA    1,OANETPAY+14            POINT R1 TO 1ST NONBLANK CHAR
+*
+*                                       EDIT PATTERN FOR OANETPAY
+         MVC   OANETPAY(15),=X'402020206B2020206B2021204B2020'
+*
+         EDMK  OANETPAY(15),PAVG        MARKED OUTPUT FOR FLOATING $
+         BCTR  1,0                      DECREMENT R1(SHIFT 1 FOR $)
+         MVI   0(1),C'$'                PLACE $
+*
+*
+         XPRNT TOTALS7,133              PRINT TOTALS LINE 7
+*
+*
+*
+*
+         SR    15,15          R15 = RETURN CODE OF 0
+         L     13,4(,13)      POINT R13 TO CALLER'S SAVE AREA
+         L     14,12(,13)     RESTORE REGISTER 14
+         LM    0,12,20(13)    RESTORE R0 THRU R12
+         BR    14             RETURN TO CALLER
+*
+         LTORG                LITERAL ORGANIZATION
+*
+PTSAVE   DS    18F            REGISTER SAVE AREA
+*
+CNPPARMS DC    A(PEMPGPAY)    PACKED EMP GROSS PAY PARARAMATER
+         DC    A(PEMPNPAY)    PACKED EMP NET PAY PARAMATER
+         DC    A(0)           PLACEHOLDER FOR PFWHPCT PARAMATER
+         DC    A(PFEDWITH)    PACKED FED WITHHOLDING AMT PARAMATER
+         DC    A(0)           PLACEHOLDER FOR PSWHPCT PARAMATER
+         DC    A(PSTWITH)     PACKED STATE WITHHOLDING AMT PARAMATER
+*
+CAPARMS  DC    A(PTOTAL)      PACKED TOTAL FIELD FOR CALCULATIONS
+         DC    A(0)           PLACEHOLDER FOR PEMPCTR
+         DC    A(PAVG)        PACKED AVERAGE FIELD FOR CALCULATIONS
+*
+*
+DBLWORD  DC    D'0'           DOUBLEWORD ON DOUBLEWORD BOUNDARY
+*
+PCALC1   DC    PL10'0'        PACKED CALC FOR GROSS PAY
+PTOTAL   DC    PL7'0'         PACKED TOTALS FOR CALCULATIONS
+PAVG     DC    PL6'0'         PACKED AVERAGE FOR CALCULATIONS
+PPAGECTR DC    PL2'0'         PACKED PAGE COUNTER (MAX 999)
+*
+PEMPGPAY DC    PL6'0'         PACKED CALCULATED EMPLOYEE GROSS PAY
+PFEDWITH DC    PL6'0'         PACKED CALCULATED FEDERAL WITHHOLDING
+PSTWITH  DC    PL6'0'         PACKED CALCULATED STATE WITHHOLDING
+PEMPNPAY DC    PL6'0'         PACKED CALCULATED EMPLOYEE NET PAY
+*
+*
+PTGRPAY  DC    PL7'0'         PACKED TOTAL GROSS EMPLOYEE PAY
+PTFWITH  DC    PL7'0'         PACKED TOTAL FEDERAL WITHHOLDING
+PTSWITH  DC    PL7'0'         PACKED TOTAL STATE WITHHOLDING
+PTNETPAY DC    PL7'0'         PACKED TOTAL NET EMPLOYEE PAY
+*
+*
+EDEMPID  DS    11C            TEMP STORAGE FOR EMPID TO AVOID CC
+*
+DETAIL   DC    C'0'           EMPLOYEE DETAIL LINE - DOUBLE SPACED
+OEMPID   DS    CL9            OUTPUT EMPLOYEE ID
+         DC    2C' '          SPACING
+OEMPNME  DS    CL25           OUTPUT EMPLOYEE NAME
+         DC    3C' '          SPACING
+OHRPAY   DS    CL7            OUTPUT HOURLY PAY
+         DC    3C' '          SPACING
+OHOURS   DS    CL7            OUTPUT HOURS WORKED
+         DC    5C' '          SPACING
+OEMPGPAY DS    CL15           OUTPUT EMPLOYEE GROSS PAY
+         DC    5C' '          SPACING
+OFEDWITH DS    CL15           OUTPUT FED WITHHOLDING AMOUNT
+         DC    3C' '          SPACING
+OSTWITH  DS    CL15           OUTPUT STATE WITHHOLDING AMOUNT
+         DC    3C' '          SPACING
+OEMPNPAY DS    CL15           OUTPUT NET PAY
+*
+HEADER1  DC    C'1'           CARRIAGE CONTROL FOR TOP-OF-PAGE
+         DC    55C' '                       SPACING
+         DC    C'ILLINOIS NATIONAL BANK'    22 CHARACTERS
+         DC    46C' '                       SPACING
+         DC    C'PAGE:'                     5 CHARACTERS
+OPAGECTR DS    CL4                          SPACING
+*
+HEADER2  DC    C' '           CARRIAGE CONTROL SINGLE SPACING
+         DC    48C' '                                    SPACING
+         DC    C'SEMI-MONTHLY EMPLOYEE PAYROLL REPORT'   36 CHARACTERS
+         DC    48C' '                                    SPACING
+*
+*
+HEADER3  DC    C'0'            CARRIAGE CONTROL DOUBLE SPACING
+         DC    C'EMPLOYEE '                              9 CHARACTERS
+         DC    2C' '                                     SPACING
+         DC    C'EMPLOYEE                 '              25
+         DC    3C' '                                     SPACING
+         DC    C' HOURLY'                                7 CHARACTERS
+         DC    3C' '                                     SPACING
+         DC    C'  HOURS'                                7 CHARACTERS
+         DC    5C' '                                     SPACING
+         DC    C'       EMPLOYEE'                        15 CHARACTERS
+         DC    4C' '                                     SPACING
+         DC    C'EMPLOYEE FEDERAL'                       16 CHARACTERS
+         DC    4C' '                                     SPACING
+         DC    C'EMPLOYEE STATE'                         14 CHARACTERS
+         DC    3C' '                                     SPACING
+         DC    C'       EMPLOYEE'                        15 CHARACTERS
+*
+*
+HEADER4  DC    C' '             CARRIAGE CONTROL SINGLE SPACING
+         DC    C'ID       '                              9 CHARACTERS
+         DC    2C' '                                     SPACING
+         DC    C'NAME                     '              25 CHARACTERS
+         DC    3C' '                                     SPACING
+         DC    C'    PAY'                                7 CHARACTERS
+         DC    3C' '                                     SPACING
+         DC    C' WORKED'                                7 CHARACTERS
+         DC    5C' '                                     SPACING
+         DC    C'      GROSS PAY'                        15 CHARACTERS
+         DC    4C' '                                     SPACING
+         DC    C'     WITHHOLDING'                       16 CHARACTERS
+         DC    4C' '                                     SPACING
+         DC    C'   WITHHOLDING'                         14 CHARACTERS
+         DC    3C' '                                     SPACING
+         DC    C'        NET PAY'                        15 CHARACTERS
+*
+*
+HEADER5  DC    C' '              CARRIAGE CONTROL SINGLE SPACING
+         DC    9C'-'             9 DASHES
+         DC    2C' '             SPACING
+         DC    25C'-'            25 DASHES
+         DC    3C' '             SPACING
+         DC    7C'-'             7 DASHES
+         DC    3C' '             SPACING
+         DC    7C'-'             7 DASHES
+         DC    5C' '             SPACING
+         DC    15C'-'            15 DASHES
+         DC    4C' '             SPACING
+         DC    16C'-'            16 DASHES
+         DC    4C' '             SPACING
+         DC    14C'-'            14 DASHES
+         DC    3C' '             SPACING
+         DC    15C'-'            15 DASHES
+*
+TOTALS1  DC    C' '              CARRIAGE CONTROL SINGLE SPACING
+         DC    48C' '                                    SPACING
+         DC    C'SEMI-MONTHLY EMPLOYEE PAYROLL REPORT'   36 CHARACTERS
+         DC    48C' '                                    SPACING
+*
+TOTALS2  DC    C' '              CARRIAGE CONTROL SINGLE SPACING
+         DC    63C' '                                    SPACING
+         DC    C'TOTALS'                                 6 CHARACTERS
+         DC    63C' '                                    SPACING
+*
+TOTALS3  DC    C'0'              CARRIAGE CONTROL DOUBLE SPACING
+         DC    C'      NUMBER OF EMPLOYEES:'             26 CHARACTERS
+         DC    10C' '                                    SPACING
+*
+OEMPCTR  DS    CL6               OUTPUT NUMBER OF EMPLOYEES
+         DC    90C' '            SPACING
+*
+*
+TOTALS4  DC    C'0'              CARRIAGE CONTROL DOUBLE SPACING
+*
+         DC    C'          TOTAL GROSS PAY: '             27 CHARACTERS
+*
+OTGRPAY  DS    CL18              OUTPUT TOTAL GROSS PAY
+         DC    20C' '            SPACING
+*
+         DC    C'AVERAGE GROSS PAY:'                      18 CHARACTERS
+*
+OAGRPAY  DS    CL9               OUTPUT AVERAGE GROSS PAY
+         DC    40C' '            SPACING
+*
+TOTALS5  DC    C'0'              CARRIAGE CONTROL DOUBLE SPACING
+*
+         DC    C'TOTAL FEDERAL WITHHOLDING: '             27 CHARACTERS
+*
+OTFWITH  DS    CL18              OUTPUT TOTAL FED WITHHOLDINGS
+         DC    11C' '            SPACING
+*
+         DC    C'AVERAGE FEDERAL WITHHOLDING'             27 CHARACTERS
+*
+OAFWITH  DS    CL9               OUTPUT AVERAGE FED WITHHOLDINGS
+         DC    40C' '            SPACING
+*
+TOTALS6  DC    C'0'              CARRIAGE CONTROL DOUBLE SPACING
+*
+         DC    C'TOTAL STATE WITHHOLDING:   '             27 CHARACTERS
+*
+OTSWITH  DS    CL18              OUTPUT TOTAL STATE WITHHOLDINGS
+         DC    11C' '            SPACING
+*
+         DC    C'AVERAGE STATE WITHHOLDING: '             27 CHARACTERS
+*
+OASWITH  DS    CL9               OUTPUT AVERAGE STATE WITHHOLDINGS
+         DC    40C' '            SPACING
+*
+*
+TOTALS7  DC    C'0'              CARRIAGE CONTROL DOUBLE SPACING
+*
+         DC    C'TOTAL NET PAY:             '             27 CHARACTERS
+*
+OTNETPAY DS    CL18              OUTPUT TOTAL NET PAY
+         DC    11C' '            SPACING
+*
+         DC    C'AVERAGE NET PAY:           '             27 CHARACTERS
+*
+OANETPAY DS    CL9               OUTPUT AVERAGE NET PAY
+         DC    40C' '            SPACING
+*
+*
+*
+*
+*****************************************************************
+*                                                               *
+*  CSCI 360-1              ASSIGNMENT 9       SUMMER 2023       *
+*                                                               *
+*  PROGRAMMER NAME: MARK SOUTHWOOD                              *
+*             DATE: 8/9/23                                      *
+*     PROGRAM NAME: CALCNPAY                                    *
+*         FUNCTION: CALCULATES NET PAY                          *
+*                   FROM PARAMATERS                             *
+*                                                               *
+*****************************************************************
+*
+CALCNPAY CSECT
+*
+* STANDARD ENTRY LINKAGE WITH R12 AS BASE REGISTER
+*
+         STM   14,12,12(13)    SAVE REGS IN CALLER'S SAVE AREA
+         LR    12,15           COPY CSECT ADDR INTO R12
+         USING CALCNPAY,12     ESTABLISH R12 AS THE BASE REG
+         LA    14,CNSAVE       R14 POINTS TO THIS CSECT'S SAVE AREA
+         ST    14,8(,13)       STORE ADDR OF THIS CSECT'S SAVE AREA
+         ST    13,4(,14)       STORE ADDR OF CALLER'S SAVE AREA
+         LR    13,14           POINT R13 AT THIS CSECT'S SAVE AREA
+*
+*
+         LM    2,7,0(1)       R2 -> PEMPGPAY(6) PACKED DECIMAL
+*                             R3 -> PEMPNPAY(6) PACKED DECIMAL
+*                             R4 -> PFWHPCT(4)  PACKED DECIMAL
+*                             R5 -> PFEDWITH(6) PACKED DECIMAL
+*                             R6 -> PSWHPCT(4)  PACKED DECIMAL
+*                             R7 -> PSTWITH(6)  PACKED DECIMAL
+*
+*************************************CALCULATE FEDERAL WITHHOLDINGS
+*
+         ZAP   PCALC2(10),0(6,2)          COPY PEMPGPAY TO PCALC
+*
+         MP    PCALC2(10),0(4,4)          MULT PCALC BY FED WITH %
+*
+         SRP   PCALC2(10),64-5,5          SHIFT 5 DEC PLACES OFF PROD
+*
+         ZAP   0(6,5),PCALC2(10)          COPY PCALC TO PFEDWITH
+*
+*
+*
+***************************************CALCULATE STATE WITHHOLDINGS
+*
+         ZAP   PCALC2(10),0(6,2)          COPY PEMPGPAY TO PCALC
+*
+         MP    PCALC2(10),0(4,6)          MULT PCALC BY STATE WITH %
+*
+         SRP   PCALC2(10),64-5,5          SHIFT 5 DEC PLACES OFF PROD
+*
+         ZAP   0(6,7),PCALC2(10)          COPY PCALC TO PSTWITH
+*
+*
+**************************************************CALCULATE NET PAY
+*
+         ZAP   PCALC2(10),0(6,2)          COPY PEMPGPAY TO PCALC
+*
+         SP    PCALC2(10),0(6,5)          SUBTRACT FED WITHHOLDINGS
+*
+         SP    PCALC2(10),0(6,7)          SUBTRACT STATE WITHHOLDINGS
+*
+         ZAP   0(6,3),PCALC2(10)          COPY PCALC TO PNEMPNPAY
+*
+*
+*
+*
+*  STANDARD EXIT LINKAGE WITH RC OF 0
+*
+         SR    15,15                    R15 = RETURN CODE OF 0
+         L     13,4(,13)                POINT R13 TO CALLER'S SAVE AREA
+         L     14,12(,13)               RESTORE REGISTER 14
+         LM    0,12,20(13)              RESTORE R0 THRU R12
+*
+         BR    14                       RETURN TO CALLER
+*
+         LTORG                          LITERAL ORGANIZATION
+*
+CNSAVE   DS    18F                      PROGRAM'S REGISTER SAVE AREA
+*
+*
+PCALC2   DC    PL10'0'        USED TO CALCULATE WITHHOLDING AND NET
+*
+*
+*****************************************************************
+*                                                               *
+*  CSCI 360-1              ASSIGNMENT 9       SUMMER 2023       *
+*                                                               *
+*  PROGRAMMER NAME: MARK SOUTHWOOD                              *
+*             DATE: 8/9/23                                      *
+*     PROGRAM NAME: CALCAVG                                     *
+*         FUNCTION: CALCULATE PAYROLL AVERAGES                  *
+*                   FROM PARAMATERS PASSED                      *
+*                                                               *
+*****************************************************************
+*
+CALCAVG  CSECT
+*
+* STANDARD ENTRY LINKAGE WITH R12 AS BASE REGISTER
+*
+         STM   14,12,12(13)    SAVE REGS IN CALLER'S SAVE AREA
+         LR    12,15           COPY CSECT ADDR INTO R12
+         USING CALCAVG,12      ESTABLISH R12 AS THE BASE REG
+         LA    14,CASAVE       R14 POINTS TO THIS CSECT'S SAVE AREA
+         ST    14,8(,13)       STORE ADDR OF THIS CSECT'S SAVE AREA
+         ST    13,4(,14)       STORE ADDR OF CALLER'S SAVE AREA
+         LR    13,14           POINT R13 AT THIS CSECT'S SAVE AREA
+*
+*
+         LM    2,4,0(1)       R2 -> PTOTAL(7) PACKED DECIMAL
+*                             R3 -> PEMPCTR(3) PACKED DECIMAL
+*                             R4 -> PAVG(6)  PACKED DECIMAL
+*
+*
+         ZAP   PCALC3(10),0(7,2)    COPY PTOTAL TO PCALC3
+         SRP   PCALC3,3,5           ADD 3 DECIMAL PLACES TO PCALC3
+         DP    PCALC3(10),0(3,3)    DIVIDE PCALC3 BY PEMPCTR
+         SRP   PCALC3(7),64-1,5     REMOVE 1 DECIMAL PLACE AND ROUND
+         ZAP   0(6,4),PCALC3(7)     COPY PCALC3 TO PAVG
+*
+*  STANDARD EXIT LINKAGE WITH RC OF 0
+*
+         SR    15,15                    R15 = RETURN CODE OF 0
+         L     13,4(,13)                POINT R13 TO CALLER'S SAVE AREA
+         L     14,12(,13)               RESTORE REGISTER 14
+         LM    0,12,20(13)              RESTORE R0 THRU R12
+*
+         BR    14                       RETURN TO CALLER
+*
+         LTORG                          LITERAL ORGANIZATION
+*
+CASAVE   DS    18F                      PROGRAM'S REGISTER SAVE AREA
+*
+PCALC3   DC    PL10'0'                  TEMP PACK FIELD FOR DIVISION
+*
+*
+         END   PAYROLL2
+*
+/*
+//*
+//FT05F001 DD DSN=KC02322.CSCI360.ASNDATA(DATA9),DISP=SHR
+//*
+//FT06F001 DD SYSOUT=*
+//
